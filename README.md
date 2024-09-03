@@ -1,4 +1,6 @@
 # cookie
+![badge](https://github.com/ddbgio/cookie/actions/workflows/test.yml/badge.svg)
+
 go package for cookie management
 
 Thanks to [A complete guide to working with Cookies in Go](https://www.alexedwards.net/blog/working-with-cookies-in-go) by Alex Edwards.
@@ -26,22 +28,28 @@ func newSecret(length int) (string, error) {
 }
 ```
 
+After a user authenticates via another means, establish a session by storing
 ```go
+// generate a user's new session token (length of 32 required)
+sessionToken, err := newSecret(32)
+
+// make a cookie using that secret
 clientCookie := http.Cookie{
-  Name:     "my-cookie-name,
+  Name:     "my-cookie-name",
   Value:    sessionToken,
   Secure:   true,
   HttpOnly: true,
   SameSite: http.SameSiteStrictMode,
   MaxAge:   3600, // 1 hour
 }
+
 // encrypt the cookie
 err = cookie.WriteEncrypted(w, userID, clientCookie, cookieSecret)
 if err != nil {
-  log.Error("failed to write cookie",
-    "error", err,
-  )
+  log.Error("failed to write cookie", "error", err)
   http.Error(w, "failed to write cookie", http.StatusInternalServerError)
   return
 }
 ```
+
+The user will now send the encrypted token back with every request until expiry. That id/token combination can be stored in the backend on creation, and checked on all subsequent requests.
