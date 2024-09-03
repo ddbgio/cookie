@@ -66,7 +66,8 @@ func Read(r *http.Request, name string) (string, error) {
 	return string(value), nil
 }
 
-// WriteSigned writes a cookie to the response with a sha256 HMAC signature
+// WriteSigned writes a cookie to the response with a sha256 HMAC signature.
+// A signed cookie can be read by the client, but is tamper-evident.
 func WriteSigned(w http.ResponseWriter, cookie http.Cookie, secretKey []byte) error {
 	if len(secretKey) == 0 {
 		return ErrSecretMissing
@@ -80,6 +81,7 @@ func WriteSigned(w http.ResponseWriter, cookie http.Cookie, secretKey []byte) er
 }
 
 // ReadSigned reads a cookie from the request and verifies the sha256 HMAC signature
+// A signed cookie can be read by the client, but is tamper-evident.
 func ReadSigned(r *http.Request, name string, secretKey []byte) (string, error) {
 	if len(secretKey) == 0 {
 		return "", ErrSecretMissing
@@ -105,6 +107,7 @@ func ReadSigned(r *http.Request, name string, secretKey []byte) (string, error) 
 }
 
 // WriteEcrypted writes a cookie to the response with an AES-GCM encrypted value
+// An encrypted cookie cannot be read by the client.
 func WriteEncrypted(w http.ResponseWriter, cookie http.Cookie, secretKey []byte) error {
 	block, err := aes.NewCipher(secretKey)
 	if err != nil {
@@ -126,6 +129,7 @@ func WriteEncrypted(w http.ResponseWriter, cookie http.Cookie, secretKey []byte)
 }
 
 // ReadEncrypted reads a cookie from the request and decrypts the AES-GCM encrypted value
+// An encrypted cookie cannot be read by the client.
 func ReadEncrypted(r *http.Request, name string, secretKey []byte) (string, error) {
 	encryptedValue, err := Read(r, name)
 	if err != nil {
