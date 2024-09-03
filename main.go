@@ -17,15 +17,19 @@ import (
 	"strings"
 )
 
+const secretLength = 32
+
 var (
-	secretKey        []byte
 	ErrInitiation    = errors.New("initialization failure")
 	ErrEncryption    = errors.New("encryption failure")
 	ErrCookie        = errors.New("cookie failure")
 	ErrSecretMissing = errors.New("secret key is missing")
 )
 
-func secret(length int) ([]byte, error) {
+// NewCookieSecret generates a random secret key for use with signed or encrypted cookies.
+// Assumes secretLength is 32.
+func NewCookieSecret() ([]byte, error) {
+	length := secretLength
 	secret := make([]byte, length)
 	_, err := rand.Read(secret)
 	if err != nil {
