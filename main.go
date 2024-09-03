@@ -3,14 +3,19 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 var (
@@ -23,7 +28,10 @@ var secretKey []byte
 
 func main() {
 	secret, ok := os.LookupEnv("COOKIE_SECRET")
-	secretKey = []byte(secret)
+	if len(secret) < 32 {
+		log.Fatal("COOKIE_SECRET must be at least 32 characters long")
+	}
+	secretKey = []byte(secret[:32])
 	if !ok {
 		log.Fatal("COOKIE_SECRET environment variable not set")
 	}
@@ -102,17 +110,73 @@ func ReadSigned(r *http.Request, name string, secretKey []byte) (string, error) 
 	return value, nil
 }
 
+func WriteEcrypted(w http.ResponseWriter, cookie http.Cookie, secretKey []byte) error {
+	block, err := aes.NewCipher(secretKey)
+	if err != nil {
+		return fmt.Errorf("unable to create new cypher block: %w", err)
+	}
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return fmt.Errorf("unable to create new GCM: %w", err)
+	}
+	nonce := make([]byte, aesGCM.NonceSize())
+	_, err = io.ReadFull(rand.Reader, nonce)
+	if err != nil {
+		return fmt.Errorf("unable to read random bytes into nonce: %w", err)
+	}
+	plaintext := fmt.Sprintf("%s:%s", cookie.Name, cookie.Value)
+	encryptedValue := aesGCM.Seal(nonce, nonce, []byte(plaintext), nil)
+	cookie.Value = string(encryptedValue)
+	return Write(w, cookie)
+}
+
+func ReadEncrypted(r *http.Request, name string, secretKey []byte) (string, error) {
+	encryptedValue, err := Read(r, name)
+	if err != nil {
+		return "", fmt.Errorf("unable to read cookie: %w", err)
+	}
+	block, err := aes.NewCipher(secretKey)
+	if err != nil {
+		return "", fmt.Errorf("unable to create new cypher block: %w", err)
+	}
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("unable to create new GCM: %w", err)
+	}
+	nonceSize := aesGCM.NonceSize()
+	if len(encryptedValue) < nonceSize {
+		err := errors.New("encrypted value too short")
+		return "", fmt.Errorf("%w: %w", ErrInvalidValue, err)
+	}
+	nonce := encryptedValue[:nonceSize]
+	ciphertext := encryptedValue[nonceSize:]
+	plaintext, err := aesGCM.Open(nil, []byte(nonce), []byte(ciphertext), nil)
+	if err != nil {
+		return "", fmt.Errorf("unable to decrypt cookie: %w", err)
+	}
+	expectedName, value, ok := strings.Cut(string(plaintext), ":")
+	if !ok {
+		err := errors.New("unable to split plaintext")
+		return "", fmt.Errorf("%w: %w", ErrInvalidValue, err)
+	}
+	if expectedName != name {
+		err := errors.New("name mismatch")
+		return "", fmt.Errorf("%w: %w", ErrInvalidValue, err)
+	}
+	return value, nil
+}
+
 func setCookieHandler(w http.ResponseWriter, r *http.Request) {
 	cookie := http.Cookie{
 		Name:     "example_cookie",
-		Value:    "snickerdoodle",
+		Value:    "chocolate fudge",
 		Path:     "/",
 		MaxAge:   86400,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	}
-	err := WriteSigned(w, cookie, secretKey)
+	err := WriteEcrypted(w, cookie, secretKey)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, "server error", http.StatusInternalServerError)
@@ -123,7 +187,7 @@ func setCookieHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getCookieHandler(w http.ResponseWriter, r *http.Request) {
-	value, err := ReadSigned(r, "example_cookie", secretKey)
+	value, err := ReadEncrypted(r, "example_cookie", secretKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, http.ErrNoCookie):
