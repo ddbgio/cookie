@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testUserID = 1312
+
 var testCookie = http.Cookie{
 	Name:     "example_cookie",
 	Value:    "chocolate fudge",
@@ -66,14 +68,14 @@ func TestWriteReadEncrypted(t *testing.T) {
 	t.Logf("ecrypting with key: %x\n", secretKey)
 
 	w := httptest.NewRecorder()
-	err = WriteEncrypted(w, testCookie, secretKey)
+	err = WriteEncrypted(w, testUserID, testCookie, secretKey)
 	require.NoError(t, err)
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.Header.Set("Cookie", w.Result().Header.Get("Set-Cookie"))
 
-	value, err := ReadEncrypted(r, testCookie.Name, secretKey)
+	id, sessionKey, err := ReadEncrypted(r, testCookie.Name, secretKey)
 	require.NoError(t, err)
-	require.Equal(t, testCookie.Value, value)
-	t.Logf("wrote and read encrypted cookie: %s=%s\n", testCookie.Name, value)
+	require.Equal(t, testCookie.Value, sessionKey)
+	t.Logf("wrote and read encrypted cookie for id:%d: %s=%s\n", id, testCookie.Name, sessionKey)
 }

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -102,7 +103,7 @@ func WriteSigned(w http.ResponseWriter, cookie http.Cookie, secretKey []byte) er
 	mac.Write([]byte(cookie.Name))
 	mac.Write([]byte(cookie.Value))
 	signature := mac.Sum(nil)
-	cookie.Value = fmt.Sprintf("%s%s", string(signature), cookie.Value) // TODO is this missing a colon?
+	cookie.Value = fmt.Sprintf("%s%s", string(signature), cookie.Value)
 	return Write(w, cookie)
 }
 
@@ -134,7 +135,7 @@ func ReadSigned(r *http.Request, name string, secretKey []byte) (string, error) 
 
 // WriteEcrypted writes a cookie to the response with an AES-GCM encrypted value
 // An encrypted cookie cannot be read by the client.
-func WriteEncrypted(w http.ResponseWriter, cookie http.Cookie, secretKey []byte) error {
+func WriteEncrypted(w http.ResponseWriter, userID int, cookie http.Cookie, secretKey []byte) error {
 	block, err := aes.NewCipher(secretKey)
 	if err != nil {
 		return fmt.Errorf("unable to create new cypher block for write: %w", err)
@@ -148,7 +149,7 @@ func WriteEncrypted(w http.ResponseWriter, cookie http.Cookie, secretKey []byte)
 	if err != nil {
 		return fmt.Errorf("unable to read random bytes into nonce: %w", err)
 	}
-	plaintext := fmt.Sprintf("%s:%s", cookie.Name, cookie.Value)
+	plaintext := fmt.Sprintf("%d:%s", userID, cookie.Value)
 	encryptedValue := aesGCM.Seal(nonce, nonce, []byte(plaintext), nil)
 	cookie.Value = string(encryptedValue)
 	return Write(w, cookie)
@@ -156,39 +157,44 @@ func WriteEncrypted(w http.ResponseWriter, cookie http.Cookie, secretKey []byte)
 
 // ReadEncrypted reads a cookie from the request and decrypts the AES-GCM encrypted value
 // An encrypted cookie cannot be read by the client.
-func ReadEncrypted(r *http.Request, name string, secretKey []byte) (string, error) {
+func ReadEncrypted(r *http.Request, name string, secretKey []byte) (int, string, error) {
 	encryptedValue, err := Read(r, name)
 	if err != nil {
-		return "", fmt.Errorf("unable to read encrypted cookie: %w", err)
+		return 0, "", fmt.Errorf("unable to read encrypted cookie: %w", err)
 	}
 	block, err := aes.NewCipher(secretKey)
 	if err != nil {
-		return "", fmt.Errorf("unable to create new cypher block for read: %w", err)
+		return 0, "", fmt.Errorf("unable to create new cypher block for read: %w", err)
 	}
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf("unable to create new GCM for read: %w", err)
+		return 0, "", fmt.Errorf("unable to create new GCM for read: %w", err)
 	}
 	nonceSize := aesGCM.NonceSize()
 	if len(encryptedValue) < nonceSize {
 		err := errors.New("encrypted value too short")
-		return "", fmt.Errorf("%w: %w", ErrCookie, err)
+		return 0, "", fmt.Errorf("%w: %w", ErrCookie, err)
 	}
 	nonce := encryptedValue[:nonceSize]
 	ciphertext := encryptedValue[nonceSize:]
 	plaintext, err := aesGCM.Open(nil, []byte(nonce), []byte(ciphertext), nil)
 	if err != nil {
-		return "", fmt.Errorf("unable to decrypt cookie: %w", err)
+		return 0, "", fmt.Errorf("unable to decrypt cookie: %w", err)
 	}
-	expectedName, value, ok := strings.Cut(string(plaintext), ":")
+	userID, sessionKey, ok := strings.Cut(string(plaintext), ":")
 	if !ok {
 		err := errors.New("unable to split plaintext")
-		return "", fmt.Errorf("%w: %w", ErrCookie, err)
+		return 0, "", fmt.Errorf("%w: %w", ErrCookie, err)
 	}
-	if expectedName != name {
-		details := fmt.Errorf("expected '%s' but got '%s'", name, expectedName)
-		err := fmt.Errorf("name mismatch: %w", details)
-		return "", fmt.Errorf("%w: %w", ErrCookie, err)
+	id, err := strconv.Atoi(userID)
+	if err != nil {
+		return 0, sessionKey, fmt.Errorf(
+			"%w: invalid id '%v' for user '%s': %w",
+			ErrCookie,
+			userID,
+			sessionKey,
+			err,
+		)
 	}
-	return value, nil
+	return id, sessionKey, nil
 }
