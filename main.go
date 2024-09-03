@@ -105,14 +105,14 @@ func ReadSigned(r *http.Request, name string, secretKey []byte) (string, error) 
 func setCookieHandler(w http.ResponseWriter, r *http.Request) {
 	cookie := http.Cookie{
 		Name:     "example_cookie",
-		Value:    "oatmeal_raisin",
+		Value:    "snickerdoodle",
 		Path:     "/",
 		MaxAge:   86400,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	}
-	err := Write(w, cookie)
+	err := WriteSigned(w, cookie, secretKey)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, "server error", http.StatusInternalServerError)
@@ -123,7 +123,7 @@ func setCookieHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getCookieHandler(w http.ResponseWriter, r *http.Request) {
-	value, err := Read(r, "example_cookie")
+	value, err := ReadSigned(r, "example_cookie", secretKey)
 	if err != nil {
 		switch {
 		case errors.Is(err, http.ErrNoCookie):
