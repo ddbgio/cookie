@@ -3,19 +3,31 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 var (
-	ErrValueTooLong = errors.New("cookie value too long")
-	ErrInvalidValue = errors.New("invalid cookie value")
+	ErrValueTooLong     = errors.New("cookie value too long")
+	ErrInvalidValue     = errors.New("invalid cookie value")
+	ErrSecretKeyMissing = errors.New("secret key missing")
 )
 
+var secretKey []byte
+
 func main() {
+	secret, ok := os.LookupEnv("COOKIE_SECRET")
+	secretKey = []byte(secret)
+	if !ok {
+		log.Fatal("COOKIE_SECRET environment variable not set")
+	}
+
 	port := ":8000"
 	mux := http.NewServeMux()
 	mux.HandleFunc("/set", setCookieHandler)
@@ -54,10 +66,46 @@ func Read(r *http.Request, name string) (string, error) {
 	return string(value), nil
 }
 
+func WriteSigned(w http.ResponseWriter, cookie http.Cookie, secretKey []byte) error {
+	if len(secretKey) == 0 {
+		return ErrSecretKeyMissing
+	}
+	mac := hmac.New(sha256.New, secretKey)
+	mac.Write([]byte(cookie.Name))
+	mac.Write([]byte(cookie.Value))
+	signature := mac.Sum(nil)
+	cookie.Value = fmt.Sprintf("%s%s", string(signature), cookie.Value)
+	return Write(w, cookie)
+}
+
+func ReadSigned(r *http.Request, name string, secretKey []byte) (string, error) {
+	if len(secretKey) == 0 {
+		return "", ErrSecretKeyMissing
+	}
+	signedValue, err := Read(r, name)
+	if err != nil {
+		return "", err
+	}
+	if len(signedValue) < sha256.Size {
+		return "", fmt.Errorf("%w: %w", ErrInvalidValue, errors.New("signature wrong length"))
+	}
+	signature := signedValue[:sha256.Size]
+	value := signedValue[sha256.Size:]
+	mac := hmac.New(sha256.New, secretKey)
+	mac.Write([]byte(name))
+	mac.Write([]byte(value))
+	expectedSignature := mac.Sum(nil)
+
+	if !hmac.Equal([]byte(signature), expectedSignature) {
+		return "", fmt.Errorf("%w: %w", ErrInvalidValue, errors.New("signature mismatch"))
+	}
+	return value, nil
+}
+
 func setCookieHandler(w http.ResponseWriter, r *http.Request) {
 	cookie := http.Cookie{
 		Name:     "example_cookie",
-		Value:    "peanut_butter",
+		Value:    "oatmeal_raisin",
 		Path:     "/",
 		MaxAge:   86400,
 		HttpOnly: true,
