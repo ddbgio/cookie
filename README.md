@@ -26,6 +26,7 @@ Create unique a new secret for the user's session token:
 ```go
 func newSecret(length int) (string, error) {
 	bytes := make([]byte, length)
+	// use crypto/rand, not math/rand, for values
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("failed to generate random bytes: %w", err)
 	}
