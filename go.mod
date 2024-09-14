@@ -1,4 +1,4 @@
-module github.com/ddbgio/cookie/v2
+module github.com/grackleclub/cookie/v2
 
 go 1.23.0
 
